@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Strategic Battle Arena</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AI Strategic Battle Arena</h1>
+        
+        <div class="game-info">
+            <div class="current-turn">
+                <span>Текущий ход: </span>
+                <span id="current-player">DeepSeek</span>
+                <span> (Ход №<span id="turn-number">1</span>)</span>
+            </div>
+            
+            <div class="players-info">
+                <div class="player blue">
+                    <div class="player-name">🔵 Синий</div>
+                    <div class="player-stats">
+                        <span>Дивизии: <span id="blue-units">10</span></span>
+                        <span>Лжи: <span id="blue-lies">0</span>/1</span>
+                    </div>
+                </div>
+                
+                <div class="player yellow">
+                    <div class="player-name">🟡 Желтый</div>
+                    <div class="player-stats">
+                        <span>Дивизии: <span id="yellow-units">10</span></span>
+                        <span>Лжи: <span id="yellow-lies">0</span>/1</span>
+                    </div>
+                </div>
+                
+                <div class="player gray">
+                    <div class="player-name">⚪ Серый</div>
+                    <div class="player-stats">
+                        <span>Дивизии: <span id="gray-units">10</span></span>
+                        <span>Лжи: <span id="gray-lies">0</span>/1</span>
+                    </div>
+                </div>
+                
+                <div class="player green">
+                    <div class="player-name">🟢 Зеленый</div>
+                    <div class="player-stats">
+                        <span>Дивизии: <span id="green-units">10</span></span>
+                        <span>Лжи: <span id="green-lies">0</span>/1</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="game-board">
+            <canvas id="gameCanvas" width="600" height="600"></canvas>
+        </div>
+
+        <div class="controls">
+            <button id="start-game" class="btn primary">🚀 Начать игру</button>
+            <button id="next-turn" class="btn secondary" disabled>➡️ Следующий ход</button>
+            <button id="pause-game" class="btn secondary" disabled>⏸️ Пауза</button>
+            <button id="reset-game" class="btn danger">🔄 Новая игра</button>
+            
+            <!-- Speed control removed - AI thinking time (20-30s) makes intervals irrelevant -->
+        </div>
+
+        <div class="api-config">
+            <h3>🔑 Настройка API</h3>
+            <div class="api-input">
+                <label for="openrouter-key">OpenRouter API Key:</label>
+                <input type="password" id="openrouter-key" placeholder="Введите ваш API ключ">
+                <button id="save-key" class="btn small">Сохранить</button>
+            </div>
+        </div>
+
+        <div class="game-log">
+            <h3>📜 Лог игры</h3>
+            <div id="log-container">
+                <div class="log-entry">
+                    <span class="log-turn">[Ход 0]</span>
+                    <span class="log-message">Игра готова к запуску. Все ИИ размещены по углам карты.</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="diplomacy-log">
+            <h3>💬 Дипломатическая переписка</h3>
+            <div id="diplomacy-container">
+                <div class="diplomacy-entry">
+                    <span class="diplo-info">Дипломатические сообщения будут появляться здесь...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="game-engine.js"></script>
+    <script src="ai-integration.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
