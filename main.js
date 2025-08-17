@@ -15,11 +15,50 @@ class Game {
         const canvas = document.getElementById('gameCanvas');
         this.gameEngine.initCanvas(canvas);
         
-        // Update model names in UI
-        // Model names are now static color names
+        // Update model names in UI - DYNAMIC from ai-integration.js
+        this.updateModelNames();
         
         // Update player stats
         this.updatePlayerStats();
+    }
+
+    // Extract short model name from full model path
+    getShortModelName(fullModelName) {
+        // Extract key parts from model names like "microsoft/mai-ds-r1:free"
+        if (fullModelName.includes('mai-ds')) return 'mai-ds';
+        if (fullModelName.includes('llama')) return 'llama-3.3';
+        if (fullModelName.includes('gpt-oss')) return 'gpt-oss';
+        if (fullModelName.includes('qwen')) return 'qwen3';
+        if (fullModelName.includes('deepseek')) return 'deepseek';
+        if (fullModelName.includes('gemini')) return 'gemini';
+        if (fullModelName.includes('mistral')) return 'mistral';
+        if (fullModelName.includes('claude')) return 'claude';
+        if (fullModelName.includes('grok')) return 'grok';
+        
+        // Fallback - extract name between '/' and ':'
+        const parts = fullModelName.split('/');
+        if (parts.length > 1) {
+            const modelPart = parts[1].split(':')[0];
+            return modelPart.substring(0, 10); // Limit length
+        }
+        
+        return 'unknown';
+    }
+
+    // DYNAMIC: Update model names in player cards from ai-integration.js
+    updateModelNames() {
+        const colors = ['blue', 'yellow', 'green', 'gray'];
+        colors.forEach(color => {
+            const modelElement = document.getElementById(`${color}-model`);
+            if (modelElement && this.aiIntegration.models[color]) {
+                const fullModelName = this.aiIntegration.models[color];
+                const shortName = this.getShortModelName(fullModelName);
+                modelElement.textContent = shortName;
+                console.log(`🎯 Updated ${color} model: ${fullModelName} → ${shortName}`);
+            } else {
+                console.warn(`⚠️ Model element not found for color: ${color}`);
+            }
+        });
     }
 
     setupEventListeners() {
@@ -88,7 +127,8 @@ class Game {
         this.updateUI();
         this.showMessage('🚀 Игра началась!', 'success');
         
-        // Auto-play removed - manual turns only
+        // AUTO-PLAY: Start first turn immediately
+        this.nextTurn();
     }
 
     async nextTurn() {
@@ -177,10 +217,16 @@ class Game {
             console.log('🔓 Turn processing finished');
         }
         
-        // Check if game ended
+        // Check if game ended or paused
         if (this.gameEngine.gameState === 'finished') {
             this.stopAutoPlay();
             this.showMessage('🏁 Игра завершена!', 'success');
+        } else if (this.gameEngine.gameState === 'running') {
+            // AUTO-PLAY: Automatically continue to next turn immediately (only if game is still running)
+            console.log('🔄 Auto-continuing to next turn...');
+            this.nextTurn();
+        } else {
+            console.log(`🔄 Not auto-continuing: game state is ${this.gameEngine.gameState}`);
         }
     }
 
@@ -194,18 +240,17 @@ class Game {
         this.updateUI();
     }
 
+    stopAutoPlay() {
+        // Stub function - auto-play is now built into nextTurn()
+        console.log('🛑 Auto-play stopped (game ended)');
+    }
+
     resetGame() {
         this.isProcessingTurn = false; // Reset turn processing flag
         this.gameEngine.resetGame();
         this.updateUI();
         this.showMessage('🔄 Игра сброшена', 'info');
     }
-
-    // Auto-play functions removed - AI thinking time makes speed control irrelevant
-
-    // Model names are now static color names - no dynamic naming needed
-
-    // getModelDisplayName removed - using static color names now
 
     updateUI() {
         // Model names are now static color names
@@ -272,7 +317,7 @@ class Game {
                 
             case 'running':
                 startButton.disabled = true;
-                nextButton.disabled = this.autoPlay;
+                nextButton.disabled = false; // Always allow manual next turn
                 pauseButton.disabled = false;
                 pauseButton.textContent = '⏸️ Пауза';
                 break;
@@ -412,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     console.log('🎮 AI Strategic Battle loaded!');
     console.log('Debug commands:');
-    console.log('- debugAI("blue") - test AI decision for Blue (or "yellow", "gray", "green")');
+    console.log('- debugAI("blue") - test AI decision for Blue (or "yellow", "green", "gray")');
     console.log('- getModelStatus() - check model availability');
     console.log('- debugBoard() - show current board state');
     console.log('- debugDiplomacy() - show all diplomacy history');

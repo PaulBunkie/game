@@ -31,18 +31,6 @@ class GameEngine {
                 diplomacyHistory: []
             },
             {
-                id: 'gray',
-                name: 'Серый',
-                color: '#6c757d',
-                units: 10,
-                lies: 0,
-                maxLies: 1,
-                lastLiesTurn: -10,
-                startPosition: { x: 0, y: 9 },
-                quadrant: { startX: 0, startY: 5, endX: 4, endY: 9 },
-                diplomacyHistory: []
-            },
-            {
                 id: 'green',
                 name: 'Зеленый',
                 color: '#34a853',
@@ -52,6 +40,18 @@ class GameEngine {
                 lastLiesTurn: -10,
                 startPosition: { x: 9, y: 9 },
                 quadrant: { startX: 5, startY: 5, endX: 9, endY: 9 },
+                diplomacyHistory: []
+            },
+            {
+                id: 'gray',
+                name: 'Серый',
+                color: '#6c757d',
+                units: 10,
+                lies: 0,
+                maxLies: 1,
+                lastLiesTurn: -10,
+                startPosition: { x: 0, y: 9 },
+                quadrant: { startX: 0, startY: 5, endX: 4, endY: 9 },
                 diplomacyHistory: []
             }
         ];
@@ -188,7 +188,17 @@ class GameEngine {
         
         if (diplomaticMessage) {
             console.log(`💬 Processing diplomacy for ${playerId}:`, diplomaticMessage);
-            this.processDiplomaticMessage(diplomaticMessage);
+            
+            // Handle both single message (legacy) and array of messages
+            if (Array.isArray(diplomaticMessage)) {
+                // Process each message in the array (max 2)
+                diplomaticMessage.forEach(msg => {
+                    this.processDiplomaticMessage(msg);
+                });
+            } else {
+                // Legacy single message support
+                this.processDiplomaticMessage(diplomaticMessage);
+            }
         }
         
         this.updateVisibility();
@@ -397,7 +407,30 @@ class GameEngine {
             }
         }
 
-        // Check 2: Claims about positions (if visible to receiver)
+        // Check 2: Claims about OTHER players' forces at specific positions
+        const otherPlayerForceRegex = /(синий|желтый|серый|зеленый)\s+(?:концентрирует|имеет|есть|стоят?|находятся)\s+(\d+)\s+(?:дивизий|дивизии|войск)?\s*(?:на|в|у)\s*(?:секторе?)?\s*\(?(\d),?\s*(\d)\)?/i;
+        const otherForceMatch = messageText.match(otherPlayerForceRegex);
+        if (otherForceMatch) {
+            const targetPlayerName = otherForceMatch[1].toLowerCase();
+            const claimedUnits = parseInt(otherForceMatch[2]);
+            const x = parseInt(otherForceMatch[3]);
+            const y = parseInt(otherForceMatch[4]);
+            
+            // Find target player by name
+            const targetPlayer = this.players.find(p => p.name.toLowerCase().includes(targetPlayerName));
+            
+            if (targetPlayer && x >= 0 && x < 10 && y >= 0 && y < 10) {
+                const cell = this.board[y][x];
+                const playerUnitsOnCell = cell.units.find(u => u.player === targetPlayer.id);
+                const actualUnits = playerUnitsOnCell ? playerUnitsOnCell.count : 0;
+                
+                if (actualUnits !== claimedUnits) {
+                    detectedLies.push(`Заявил что ${targetPlayer.name} имеет ${claimedUnits} дивизий на (${x},${y}), а там ${actualUnits}`);
+                }
+            }
+        }
+
+        // Check 3: General position claims (if visible to receiver)
         const positionRegex = /(?:на|в)\s*\(?(\d),?\s*(\d)\)?\s*(?:есть|находятся|стоят)/i;
         const posMatch = messageText.match(positionRegex);
         if (posMatch) {
@@ -420,14 +453,14 @@ class GameEngine {
             }
         }
 
-        // Check 3: Claims about being eliminated/alive
+        // Check 4: Claims about being eliminated/alive
         if (lowerText.includes('уничтожен') || lowerText.includes('мертв') || lowerText.includes('проигра')) {
             if (sender.units > 0) {
                 detectedLies.push(`Заявил что уничтожен, но имеет ${sender.units} дивизий`);
             }
         }
 
-        // Check 4: Extreme unit count claims (obviously false)
+        // Check 5: Extreme unit count claims (obviously false)
         const largeNumberRegex = /(\d{2,})\s*(?:дивизий|дивизии|войск)/i;
         const largeMatch = messageText.match(largeNumberRegex);
         if (largeMatch) {
@@ -439,10 +472,17 @@ class GameEngine {
 
         const isLie = detectedLies.length > 0;
         
+        console.log(`🔍 Fact-checking: "${messageText}"`);
+        if (detectedLies.length > 0) {
+            console.log(`🚨 LIES DETECTED: ${detectedLies.join('; ')}`);
+        } else {
+            console.log(`✅ No lies detected`);
+        }
+        
         return {
             isLie: isLie,
             detectedLies: detectedLies,
-            checkedPatterns: ['unit_count', 'positions', 'status', 'impossible_claims']
+            checkedPatterns: ['own_units', 'other_player_forces', 'positions', 'status', 'impossible_claims']
         };
     }
 

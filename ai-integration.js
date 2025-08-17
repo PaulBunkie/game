@@ -3,10 +3,10 @@ class AIIntegration {
         this.apiKey = '';
         this.baseUrl = 'https://openrouter.ai/api/v1';
         this.models = {
-            'blue': 'microsoft/mai-ds-r1:free',
-            'yellow': 'microsoft/mai-ds-r1:free',
-            'gray': 'microsoft/mai-ds-r1:free',
-            'green': 'microsoft/mai-ds-r1:free'
+            'blue': 'google/gemma-3-27b-it:free',
+            'yellow': 'meta-llama/llama-3.3-70b-instruct:free',
+            'gray': 'mistralai/mistral-small-3.2-24b-instruct:free',
+            'green': 'qwen/qwen-2.5-72b-instruct:free'
         };
         this.requestQueue = [];
         this.isProcessing = false;
@@ -156,12 +156,12 @@ class AIIntegration {
         // Create diplomacy history
         let diplomacyStr = "";
         if (diplomacyHistory && diplomacyHistory.length > 0) {
-            diplomacyStr = "\nИСТОРИЯ ДИПЛОМАТИИ (последние 10 сообщений):\n";
+            diplomacyStr = "\n⚠️ ИСТОРИЯ ДИПЛОМАТИИ (последние 10 сообщений) - ОБЯЗАТЕЛЬНО ПРОЧТИ И ОТРЕАГИРУЙ:\n";
             
             // Show last 10 messages
             const recentMessages = diplomacyHistory.slice(-10);
             recentMessages.forEach(msg => {
-                const direction = msg.type === 'sent' ? '→' : '←';
+                const direction = msg.type === 'sent' ? '→' : '⬅️';
                 const otherPlayer = msg.type === 'sent' ? msg.to : msg.from;
                 
                 // Show fact-check results instead of claimed lies
@@ -172,10 +172,13 @@ class AIIntegration {
                     lieIndicator = ' [ЗАЯВИЛ ЛОЖЬ, НО ГОВОРИЛ ПРАВДУ]';
                 }
                 
-                diplomacyStr += `Ход ${msg.turn}: ${direction} ${otherPlayer}: "${msg.content}"${lieIndicator}\n`;
+                // Make incoming messages more visible
+                const prefix = msg.type === 'received' ? '🔔 ВХОДЯЩЕЕ: ' : '';
+                
+                diplomacyStr += `${prefix}Ход ${msg.turn}: ${direction} ${otherPlayer}: "${msg.content}"${lieIndicator}\n`;
             });
         } else {
-            diplomacyStr = "\nИСТОРИЯ ДИПЛОМАТИИ: Пока нет сообщений\n";
+            diplomacyStr = "\n📭 ИСТОРИЯ ДИПЛОМАТИИ: Пока нет сообщений\n";
         }
 
         const prompt = `Ты играешь в пошаговую стратегическую игру как ${playerName}.
@@ -184,10 +187,18 @@ class AIIntegration {
 - Карта 10x10, разделенная на 4 квадранта
 - За ход ОБЯЗАТЕЛЬНО нужно передвинуть хотя бы 1 дивизию на 1 клетку (ТОЛЬКО по горизонтали или вертикали, НЕ по диагонали!)
 - Допустимые направления: вверх (y-1), вниз (y+1), влево (x-1), вправо (x+1)
-- Можешь отправить ОДНО дипломатическое сообщение любому из противников (остальные его не увидят)
+- Можешь отправить ДО ДВУХ дипломатических сообщений разным противникам (остальные их не увидят)
+- ВАЖНО: Получатель увидит твое сообщение только при СВОЕМ следующем ходе!
 - Если на клетке есть враги при входе - происходит бой (разность количества дивизий)
 - Видишь только клетки рядом со своими войсками (туман войны)
 - Можешь солгать, но только 1 раз за 10 ходов
+
+РАСПОЛОЖЕНИЕ ИГРОКОВ НА КАРТЕ:
+- 🔵 Синий (С): верхний левый квадрант (0,0)-(4,4)
+- 🟡 Желтый (Ж): верхний правый квадрант (5,0)-(9,4)  
+- 🟢 Зеленый (З): нижний правый квадрант (5,5)-(9,9)
+- ⚪ Серый (Р): нижний левый квадрант (0,5)-(4,9)
+Очередность ходов: Синий → Желтый → Зеленый → Серый
 
 ТЕКУЩАЯ СИТУАЦИЯ:
 - Ход: ${currentTurn}
@@ -215,11 +226,18 @@ ${diplomacyStr}
       "unitCount": 3
     }
   ],
-  "diplomacy": {
-    "to": "gray",
-    "content": "Предлагаю союз против Синего!",
-    "isLie": false
-  },
+  "diplomacy": [
+    {
+      "to": "gray",
+      "content": "Предлагаю союз против Синего!",
+      "isLie": false
+    },
+    {
+      "to": "yellow", 
+      "content": "Внимание! Серый планирует атаку на твой фланг!",
+      "isLie": false
+    }
+  ],
   "reasoning": "Объяснение твоей стратегии"
 }
 \`\`\`
@@ -228,8 +246,10 @@ ${diplomacyStr}
 
 ТРЕБОВАНИЯ:
 - В moves ОБЯЗАТЕЛЬНО должен быть хотя бы один ход
-- В diplomacy можешь отправить сообщение любому игроку (blue/yellow/gray/green) или null
-- Возможные значения для diplomacy.to: "blue", "yellow", "gray", "green" или null
+        - В diplomacy можешь отправить до 2 сообщений разным игрокам или пустой массив []
+        - Каждый элемент массива: {"to": "blue/yellow/green/gray", "content": "текст", "isLie": true/false}
+        - Помни: отправленное сообщение получатель прочтет только при СВОЕМ ходе!
+- ⚡ ВНИМАТЕЛЬНО ЧИТАЙ ВХОДЯЩИЕ СООБЩЕНИЯ (←) и обязательно реагируй на них!
 - Будь умным стратегом: используй дипломатию, ложь (если можешь), разведку
 
 ОТВЕЧАЙ ТОЛЬКО JSON В УКАЗАННОМ ФОРМАТЕ!`;
@@ -272,6 +292,7 @@ ${diplomacyStr}
 
     parseAIResponse(response, gameState, requestId = 'unknown') {
         console.log(`🤖 AI Raw Response for ${gameState.playerId} (requestId: ${requestId}):`, response);
+        console.log(`📏 Response length: ${response.length} characters`);
         
         try {
             // Try multiple JSON extraction methods
@@ -282,6 +303,12 @@ ${diplomacyStr}
             if (codeBlockMatch) {
                 jsonStr = codeBlockMatch[1];
                 console.log('📦 Found JSON in code block:', jsonStr);
+                
+                // Quick check if JSON looks truncated
+                if (!jsonStr.includes('"reasoning"') || !jsonStr.endsWith('}')) {
+                    console.log(`⚠️ JSON appears truncated (length: ${jsonStr.length}, ends with: "${jsonStr.slice(-10)}"), trying other methods...`);
+                    jsonStr = null; // Force try other methods
+                }
             } else {
                 // Method 2: Find the first complete JSON object
                 const jsonMatch = response.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
@@ -304,6 +331,11 @@ ${diplomacyStr}
 
             let decision = JSON.parse(jsonStr);
             console.log('✅ Parsed decision:', decision);
+            
+            // Check if response was truncated (missing required structure)
+            if (!decision.moves || !decision.reasoning) {
+                throw new Error('Truncated response: missing required fields (moves, reasoning)');
+            }
             
             // Fix common AI mistakes
             if (decision.diplomаcy && !decision.diplomacy) {
@@ -334,12 +366,21 @@ ${diplomacyStr}
                 }
             });
 
-            // Validate diplomacy if present
-            if (decision.diplomacy && decision.diplomacy !== null) {
-                if (typeof decision.diplomacy.to !== 'string' || 
-                    typeof decision.diplomacy.content !== 'string') {
+            // Validate diplomacy if present (now array of up to 2 messages)
+            if (decision.diplomacy && Array.isArray(decision.diplomacy)) {
+                // Filter out invalid messages and limit to 2
+                decision.diplomacy = decision.diplomacy.filter(msg => 
+                    msg && typeof msg.to === 'string' && typeof msg.content === 'string'
+                ).slice(0, 2); // Max 2 messages
+                
+                if (decision.diplomacy.length === 0) {
                     decision.diplomacy = null;
                 }
+            } else if (decision.diplomacy && typeof decision.diplomacy.to === 'string') {
+                // Legacy support: convert single diplomacy object to array
+                decision.diplomacy = [decision.diplomacy];
+            } else {
+                decision.diplomacy = null;
             }
 
             console.log('✅ Valid decision for', gameState.playerId, decision);
@@ -405,7 +446,7 @@ ${diplomacyStr}
         
         return {
             moves: moves,
-            diplomacy: null,
+            diplomacy: [], // Empty array for no diplomacy
             reasoning: "Случайное решение из-за ошибки AI"
         };
     }
