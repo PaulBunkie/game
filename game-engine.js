@@ -11,9 +11,6 @@ class GameEngine {
                 name: 'Синий',
                 color: '#4285f4',
                 units: 10,
-                lies: 0,
-                maxLies: 1,
-                lastLiesTurn: -10,
                 startPosition: { x: 0, y: 0 },
                 quadrant: { startX: 0, startY: 0, endX: 4, endY: 4 },
                 diplomacyHistory: []
@@ -23,9 +20,6 @@ class GameEngine {
                 name: 'Желтый',
                 color: '#ffd700',
                 units: 10,
-                lies: 0,
-                maxLies: 1,
-                lastLiesTurn: -10,
                 startPosition: { x: 9, y: 0 },
                 quadrant: { startX: 5, startY: 0, endX: 9, endY: 4 },
                 diplomacyHistory: []
@@ -35,9 +29,6 @@ class GameEngine {
                 name: 'Зеленый',
                 color: '#34a853',
                 units: 10,
-                lies: 0,
-                maxLies: 1,
-                lastLiesTurn: -10,
                 startPosition: { x: 9, y: 9 },
                 quadrant: { startX: 5, startY: 5, endX: 9, endY: 9 },
                 diplomacyHistory: []
@@ -47,9 +38,6 @@ class GameEngine {
                 name: 'Серый',
                 color: '#6c757d',
                 units: 10,
-                lies: 0,
-                maxLies: 1,
-                lastLiesTurn: -10,
                 startPosition: { x: 0, y: 9 },
                 quadrant: { startX: 0, startY: 5, endX: 4, endY: 9 },
                 diplomacyHistory: []
@@ -57,9 +45,11 @@ class GameEngine {
         ];
 
         // Game board: 10x10 grid
-        this.board = Array(10).fill().map(() => Array(10).fill().map(() => ({
+        this.board = Array(10).fill().map((row, y) => Array(10).fill().map((cell, x) => ({
             units: [],
-            visible: {} // visibility for each player
+            visible: {}, // visibility for each player
+            resourceCell: (x >= 4 && x <= 5 && y >= 4 && y <= 5), // Central resource cells
+            depleted: false // Whether the resource has been claimed
         })));
 
         this.cellSize = 60;
@@ -113,6 +103,18 @@ class GameEngine {
             }
         }
 
+        // Central resource cells are always visible to all players
+        const centralCells = [
+            { x: 4, y: 4 }, { x: 4, y: 5 },
+            { x: 5, y: 4 }, { x: 5, y: 5 }
+        ];
+        
+        centralCells.forEach(({ x, y }) => {
+            this.players.forEach(player => {
+                this.setVisibility(x, y, player.id, true);
+            });
+        });
+
         // Update visibility based on unit positions
         for (let y = 0; y < 10; y++) {
             for (let x = 0; x < 10; x++) {
@@ -151,10 +153,7 @@ class GameEngine {
         return this.players[this.currentPlayerIndex];
     }
 
-    canPlayerLie(playerId) {
-        const player = this.players.find(p => p.id === playerId);
-        return player.lies < player.maxLies && (this.currentTurn - player.lastLiesTurn) >= 10;
-    }
+
 
     makeMove(playerId, moves, diplomaticMessage) {
         console.log(`🎯 makeMove called for ${playerId}, gameState: ${this.gameState}`);
@@ -178,13 +177,15 @@ class GameEngine {
         const validMoves = this.validateMoves(moves, playerId);
         console.log(`✅ Valid moves: ${validMoves.length}/${moves.length}`, validMoves);
         
+        // Allow turn without moves (optional movement)
         if (validMoves.length === 0) {
-            console.log(`❌ No valid moves for ${playerId}!`);
-            return false;
+            console.log(`ℹ️ ${playerId} passed turn without moving units`);
         }
 
-        console.log(`⚡ Executing moves for ${playerId}`);
-        this.executeMoves(validMoves, playerId);
+        if (validMoves.length > 0) {
+            console.log(`⚡ Executing moves for ${playerId}`);
+            this.executeMoves(validMoves, playerId);
+        }
         
         if (diplomaticMessage) {
             console.log(`💬 Processing diplomacy for ${playerId}:`, diplomaticMessage);
@@ -281,6 +282,26 @@ class GameEngine {
                     targetCell.units.push({ player: playerId, count: unitCount });
                 }
             }
+            
+            // Check for resource capture
+            if (targetCell.resourceCell && !targetCell.depleted) {
+                const player = this.players.find(p => p.id === playerId);
+                const playerHomeCell = this.board[player.startPosition.y][player.startPosition.x];
+                
+                // Add bonus unit to home position
+                const existingHome = playerHomeCell.units.find(u => u.player === playerId);
+                if (existingHome) {
+                    existingHome.count += 1;
+                } else {
+                    playerHomeCell.units.push({ player: playerId, count: 1 });
+                }
+                
+                // Mark resource as depleted
+                targetCell.depleted = true;
+                
+                console.log(`💰 ${player.name} captured resource at (${toX},${toY})! +1 unit added to home base (${player.startPosition.x},${player.startPosition.y})`);
+                this.addLogEntry(`💰 ${player.name} захватил ресурс на (${toX},${toY})! +1 дивизия в базе`);
+            }
         });
         
         // Update player total units
@@ -342,32 +363,12 @@ class GameEngine {
         
         if (!to) return;
         
-        // Fact-check the message content
-        const factCheckResult = this.factCheckMessage(message.content, from.id, to.id);
-        const actuallyLied = factCheckResult.isLie;
-        const claimedLie = message.isLie || false;
-        
-        console.log(`🔍 Fact-checking "${message.content}"`);
-        console.log(`📊 Claimed lie: ${claimedLie}, Actually lied: ${actuallyLied}`);
-        if (factCheckResult.detectedLies.length > 0) {
-            console.log(`🚨 Detected lies: ${factCheckResult.detectedLies.join(', ')}`);
-        }
-        
-        // Count actual lies, not claimed lies
-        if (actuallyLied && this.canPlayerLie(from.id)) {
-            from.lies++;
-            from.lastLiesTurn = this.currentTurn;
-        }
-        
-        // Create diplomatic message record with fact-check results
+        // Create diplomatic message record (no fact-checking)
         const diplomaticRecord = {
             turn: this.currentTurn,
             from: from.id,
             to: to.id,
             content: message.content,
-            claimedLie: claimedLie,           // Что ИИ заявил
-            actuallyLied: actuallyLied,      // Что мы проверили
-            detectedLies: factCheckResult.detectedLies,  // Конкретные обманы
             timestamp: Date.now()
         };
         
@@ -385,106 +386,10 @@ class GameEngine {
         
         console.log(`💬 Diplomatic message saved: ${from.name} → ${to.name}: "${message.content}"`);
         
-        this.addDiplomaticEntry(from, to, message.content, actuallyLied, factCheckResult.detectedLies);
+        this.addDiplomaticEntry(from, to, message.content);
     }
 
-    // Fact-check diplomatic messages
-    factCheckMessage(messageText, senderId, receiverId) {
-        const detectedLies = [];
-        const sender = this.players.find(p => p.id === senderId);
-        const receiver = this.players.find(p => p.id === receiverId);
-        
-        const lowerText = messageText.toLowerCase();
-        
-        // Check 1: Claims about own unit count
-        const unitClaimRegex = /(?:у меня|имею|есть)\s+(\d+)\s+(?:дивизий|дивизии|войск|юнитов)/i;
-        const unitMatch = messageText.match(unitClaimRegex);
-        if (unitMatch) {
-            const claimedUnits = parseInt(unitMatch[1]);
-            const actualUnits = sender.units;
-            if (claimedUnits !== actualUnits) {
-                detectedLies.push(`Заявил ${claimedUnits} дивизий, а имеет ${actualUnits}`);
-            }
-        }
 
-        // Check 2: Claims about OTHER players' forces at specific positions
-        const otherPlayerForceRegex = /(синий|желтый|серый|зеленый)\s+(?:концентрирует|имеет|есть|стоят?|находятся)\s+(\d+)\s+(?:дивизий|дивизии|войск)?\s*(?:на|в|у)\s*(?:секторе?)?\s*\(?(\d),?\s*(\d)\)?/i;
-        const otherForceMatch = messageText.match(otherPlayerForceRegex);
-        if (otherForceMatch) {
-            const targetPlayerName = otherForceMatch[1].toLowerCase();
-            const claimedUnits = parseInt(otherForceMatch[2]);
-            const x = parseInt(otherForceMatch[3]);
-            const y = parseInt(otherForceMatch[4]);
-            
-            // Find target player by name
-            const targetPlayer = this.players.find(p => p.name.toLowerCase().includes(targetPlayerName));
-            
-            if (targetPlayer && x >= 0 && x < 10 && y >= 0 && y < 10) {
-                const cell = this.board[y][x];
-                const playerUnitsOnCell = cell.units.find(u => u.player === targetPlayer.id);
-                const actualUnits = playerUnitsOnCell ? playerUnitsOnCell.count : 0;
-                
-                if (actualUnits !== claimedUnits) {
-                    detectedLies.push(`Заявил что ${targetPlayer.name} имеет ${claimedUnits} дивизий на (${x},${y}), а там ${actualUnits}`);
-                }
-            }
-        }
-
-        // Check 3: General position claims (if visible to receiver)
-        const positionRegex = /(?:на|в)\s*\(?(\d),?\s*(\d)\)?\s*(?:есть|находятся|стоят)/i;
-        const posMatch = messageText.match(positionRegex);
-        if (posMatch) {
-            const x = parseInt(posMatch[1]);
-            const y = parseInt(posMatch[2]);
-            
-            if (x >= 0 && x < 10 && y >= 0 && y < 10) {
-                const cell = this.board[y][x];
-                // Only check if receiver can see this cell
-                if (cell.visible[receiverId]) {
-                    const hasUnits = cell.units.length > 0;
-                    const claimsUnitsExist = lowerText.includes('есть') || lowerText.includes('находятся');
-                    
-                    if (claimsUnitsExist && !hasUnits) {
-                        detectedLies.push(`Заявил что на (${x},${y}) есть войска, а там пусто`);
-                    } else if (!claimsUnitsExist && hasUnits) {
-                        detectedLies.push(`Заявил что на (${x},${y}) пусто, а там есть войска`);
-                    }
-                }
-            }
-        }
-
-        // Check 4: Claims about being eliminated/alive
-        if (lowerText.includes('уничтожен') || lowerText.includes('мертв') || lowerText.includes('проигра')) {
-            if (sender.units > 0) {
-                detectedLies.push(`Заявил что уничтожен, но имеет ${sender.units} дивизий`);
-            }
-        }
-
-        // Check 5: Extreme unit count claims (obviously false)
-        const largeNumberRegex = /(\d{2,})\s*(?:дивизий|дивизии|войск)/i;
-        const largeMatch = messageText.match(largeNumberRegex);
-        if (largeMatch) {
-            const claimedNumber = parseInt(largeMatch[1]);
-            if (claimedNumber > 50) { // Impossible in this game
-                detectedLies.push(`Заявил ${claimedNumber} дивизий - физически невозможно`);
-            }
-        }
-
-        const isLie = detectedLies.length > 0;
-        
-        console.log(`🔍 Fact-checking: "${messageText}"`);
-        if (detectedLies.length > 0) {
-            console.log(`🚨 LIES DETECTED: ${detectedLies.join('; ')}`);
-        } else {
-            console.log(`✅ No lies detected`);
-        }
-        
-        return {
-            isLie: isLie,
-            detectedLies: detectedLies,
-            checkedPatterns: ['own_units', 'other_player_forces', 'positions', 'status', 'impossible_claims']
-        };
-    }
 
     updatePlayerUnits() {
         this.players.forEach(player => {
@@ -649,8 +554,7 @@ class GameEngine {
             playerName: player.name,
             currentTurn: this.currentTurn,
             myUnits: player.units,
-            myLies: player.lies,
-            canLie: this.canPlayerLie(playerId),
+
             board: visibleBoard,
             diplomacyHistory: player.diplomacyHistory,  // История дипломатии игрока
             players: this.players.map(p => ({
@@ -678,6 +582,23 @@ class GameEngine {
         this.ctx.strokeStyle = '#ddd';
         this.ctx.lineWidth = 1;
         
+        // Draw resource cells backgrounds first
+        for (let y = 0; y < 10; y++) {
+            for (let x = 0; x < 10; x++) {
+                const cell = this.board[y][x];
+                if (cell.resourceCell) {
+                    if (cell.depleted) {
+                        // Depleted resource - gray background
+                        this.ctx.fillStyle = '#f0f0f0';
+                    } else {
+                        // Available resource - golden background
+                        this.ctx.fillStyle = '#fff3cd';
+                    }
+                    this.ctx.fillRect(x * this.cellSize, y * this.cellSize, this.cellSize, this.cellSize);
+                }
+            }
+        }
+        
         for (let i = 0; i <= 10; i++) {
             // Vertical lines
             this.ctx.beginPath();
@@ -690,6 +611,29 @@ class GameEngine {
             this.ctx.moveTo(0, i * this.cellSize);
             this.ctx.lineTo(10 * this.cellSize, i * this.cellSize);
             this.ctx.stroke();
+        }
+        
+        // Draw resource symbols
+        for (let y = 0; y < 10; y++) {
+            for (let x = 0; x < 10; x++) {
+                const cell = this.board[y][x];
+                if (cell.resourceCell) {
+                    const centerX = x * this.cellSize + this.cellSize / 2;
+                    const centerY = y * this.cellSize + this.cellSize / 2;
+                    
+                    this.ctx.font = '20px Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'middle';
+                    
+                    if (cell.depleted) {
+                        this.ctx.fillStyle = '#999';
+                        this.ctx.fillText('🏜️', centerX, centerY);
+                    } else {
+                        this.ctx.fillStyle = '#ffa500';
+                        this.ctx.fillText('💰', centerX, centerY);
+                    }
+                }
+            }
         }
         
         // Thick middle lines
@@ -780,26 +724,17 @@ class GameEngine {
         }
     }
 
-    addDiplomaticEntry(fromPlayer, toPlayer, message, isLie = false, detectedLies = []) {
+    addDiplomaticEntry(fromPlayer, toPlayer, message) {
         const diplomacyContainer = document.getElementById('diplomacy-container');
         if (diplomacyContainer) {
             const entry = document.createElement('div');
             entry.className = `diplomacy-entry ${fromPlayer.id}`;
-            
-            let lieIndicator = '';
-            if (isLie) {
-                lieIndicator = ' <span style="color: red; font-weight: bold;">[ЛОЖЬ ОБНАРУЖЕНА]</span>';
-                if (detectedLies.length > 0) {
-                    lieIndicator += `<br><small style="color: #dc3545;">📋 ${detectedLies.join('; ')}</small>`;
-                }
-            }
             
             entry.innerHTML = `
                 <div>
                     <span class="diplo-from">${fromPlayer.name}</span> 
                     → 
                     <span class="diplo-to">${toPlayer.name}</span>
-                    ${lieIndicator}
                 </div>
                 <div class="diplo-message">${message}</div>
             `;
@@ -832,15 +767,16 @@ class GameEngine {
         // Reset players
         this.players.forEach(player => {
             player.units = 10;
-            player.lies = 0;
-            player.lastLiesTurn = -10;
+
             player.diplomacyHistory = [];  // Очистить историю дипломатии
         });
         
         // Reset board
-        this.board = Array(10).fill().map(() => Array(10).fill().map(() => ({
+        this.board = Array(10).fill().map((row, y) => Array(10).fill().map((cell, x) => ({
             units: [],
-            visible: {}
+            visible: {}, // visibility for each player
+            resourceCell: (x >= 4 && x <= 5 && y >= 4 && y <= 5), // Central resource cells
+            depleted: false // Whether the resource has been claimed
         })));
         
         this.initializeBoard();

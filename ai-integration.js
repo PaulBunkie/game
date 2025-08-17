@@ -39,8 +39,6 @@ class AIIntegration {
             this.activeRequestId = requestId;
         }
         
-        console.log(`🔍 makeAIDecision called for playerId: ${playerId}, requestId: ${requestId}`);
-        
         const model = this.models[playerId];
         
         if (!model) {
@@ -50,13 +48,15 @@ class AIIntegration {
         const prompt = this.generatePrompt(gameState);
         
         try {
+            console.log(`🔍 AI ${playerId}: Вызываю OpenRouter API для модели ${model}`);
             const response = await this.callOpenRouter(model, prompt);
             
             // Проверяем, что запрос все еще актуален
             if (this.activeRequestId !== requestId) {
-                console.log(`🚫 Ignoring stale response for ${playerId} (requestId: ${requestId}, active: ${this.activeRequestId})`);
                 throw new Error(`Stale request: ${requestId} != ${this.activeRequestId}`);
             }
+            
+            console.log(`✅ AI ${playerId}: Получил ответ длиной ${response?.length || 0}`);
             
             // Check if response is empty or too short
             if (!response || response.trim().length < 10) {
@@ -67,7 +67,7 @@ class AIIntegration {
             
             // Check if we got a fallback decision and retry if so
             if (decision.reasoning === "Случайное решение из-за ошибки AI" && retryCount < 2) {
-                console.log(`🔄 Retry attempt ${retryCount + 1} for ${playerId}`);
+                console.log(`🔄 AI ${playerId}: Повторная попытка из-за fallback решения`);
                 await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
                 return this.makeAIDecision(gameState, gameEngine, retryCount + 1, requestId);
             }
@@ -76,30 +76,39 @@ class AIIntegration {
         } catch (error) {
             // Проверяем, что запрос все еще актуален
             if (this.activeRequestId !== requestId) {
-                console.log(`🚫 Ignoring stale error for ${playerId} (requestId: ${requestId}, active: ${this.activeRequestId})`);
                 throw error; // Просто пробрасываем ошибку, она будет проигнорирована
             }
             
-            console.error(`❌ Ошибка AI для ${playerId} (попытка ${retryCount + 1}):`, error);
+            console.error(`❌ Ошибка AI для ${playerId} (попытка ${retryCount + 1}):`, error.message);
             
             // Retry up to 2 times
             if (retryCount < 2) {
-                console.log(`🔄 Retry attempt ${retryCount + 1} for ${playerId}`);
                 await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
                 return this.makeAIDecision(gameState, gameEngine, retryCount + 1, requestId);
             }
             
             // Final fallback to random decision
-            console.log(`🎲 Final fallback for ${playerId} after ${retryCount + 1} attempts`);
             return this.generateRandomDecision(gameState);
         }
+    }
+
+    isHomeBase(x, y, playerId) {
+        const homePositions = {
+            'blue': { x: 0, y: 0 },
+            'yellow': { x: 9, y: 0 },
+            'green': { x: 9, y: 9 },
+            'gray': { x: 0, y: 9 }
+        };
+        
+        const home = homePositions[playerId];
+        return home && x === home.x && y === home.y;
     }
 
     generatePrompt(gameState) {
         const { playerId, playerName, currentTurn, myUnits, canLie, board, players, diplomacyHistory } = gameState;
         
         // Create visible board representation
-        let boardStr = "Текущее состояние карты (только видимые вам клетки):\n";
+        let boardStr = "Текущее состояние карты (видимые вам клетки + центральные ресурсы всегда видны):\n";
         boardStr += "   0 1 2 3 4 5 6 7 8 9\n";
         
         for (let y = 0; y < 10; y++) {
@@ -108,7 +117,16 @@ class AIIntegration {
                 const cell = board[y][x];
                 if (cell.visible) {
                     if (cell.units.length === 0) {
-                        boardStr += " . ";
+                        // Check if this is a central resource cell
+                        if (cell.resourceCell) {
+                            if (cell.depleted) {
+                                boardStr += "🏜️ "; // Depleted resource
+                            } else {
+                                boardStr += "💰 "; // Available resource
+                            }
+                        } else {
+                            boardStr += " . ";
+                        }
                     } else {
                         const unit = cell.units[0]; // Show first unit
                         const playerSymbol = {
@@ -120,7 +138,16 @@ class AIIntegration {
                         boardStr += unit.count < 10 ? ` ${playerSymbol}${unit.count}` : `${playerSymbol}${unit.count}`;
                     }
                 } else {
-                    boardStr += " ? ";
+                    // Check if this is a central resource cell (always visible)
+                    if (cell.resourceCell) {
+                        if (cell.depleted) {
+                            boardStr += "🏜️ "; // Depleted resource
+                        } else {
+                            boardStr += "💰 "; // Available resource
+                        }
+                    } else {
+                        boardStr += " ? ";
+                    }
                 }
             }
             boardStr += "\n";
@@ -137,7 +164,10 @@ class AIIntegration {
                     const myUnit = cell.units.find(u => u.player === playerId);
                     if (myUnit && myUnit.count > 0) {
                         foundMyUnits.push(`(${x},${y}): ${myUnit.count} дивизий`);
-                        myUnitsStr += `- Позиция (${x},${y}): ${myUnit.count} дивизий\n`;
+                        // Highlight home base units (they might be bonus units)
+                        const isHomeBase = this.isHomeBase(x, y, playerId);
+                        const homeBaseMarker = isHomeBase ? " 🏠" : "";
+                        myUnitsStr += `- Позиция (${x},${y}): ${myUnit.count} дивизий${homeBaseMarker}\n`;
                     }
                 }
             }
@@ -153,10 +183,29 @@ class AIIntegration {
             playersStr += `- ${p.name}: ${p.units} дивизий ${p.isAlive ? '(жив)' : '(мертв)'}\n`;
         });
 
+        // Create central resources status (always visible to all players)
+        let resourcesStr = "\n💰 СТАТУС ЦЕНТРАЛЬНЫХ РЕСУРСОВ:\n";
+        const centralCells = [
+            { x: 4, y: 4 }, { x: 4, y: 5 },
+            { x: 5, y: 4 }, { x: 5, y: 5 }
+        ];
+        
+        centralCells.forEach(({ x, y }) => {
+            const cell = board[y][x];
+            if (cell.resourceCell) {
+                if (cell.depleted) {
+                    resourcesStr += `- Клетка (${x},${y}): 🏜️ Ресурс исчерпан\n`;
+                } else {
+                    resourcesStr += `- Клетка (${x},${y}): 💰 Ресурс доступен (+1 дивизия)\n`;
+                }
+            }
+        });
+
         // Create diplomacy history
         let diplomacyStr = "";
         if (diplomacyHistory && diplomacyHistory.length > 0) {
             diplomacyStr = "\n⚠️ ИСТОРИЯ ДИПЛОМАТИИ (последние 10 сообщений) - ОБЯЗАТЕЛЬНО ПРОЧТИ И ОТРЕАГИРУЙ:\n";
+            diplomacyStr += "💀 ПОМНИ: Дипломатия - это тоже оружие!\n";
             
             // Show last 10 messages
             const recentMessages = diplomacyHistory.slice(-10);
@@ -164,34 +213,34 @@ class AIIntegration {
                 const direction = msg.type === 'sent' ? '→' : '⬅️';
                 const otherPlayer = msg.type === 'sent' ? msg.to : msg.from;
                 
-                // Show fact-check results instead of claimed lies
-                let lieIndicator = '';
-                if (msg.actuallyLied) {
-                    lieIndicator = ' [ЛОЖЬ ОБНАРУЖЕНА]';
-                } else if (msg.claimedLie && !msg.actuallyLied) {
-                    lieIndicator = ' [ЗАЯВИЛ ЛОЖЬ, НО ГОВОРИЛ ПРАВДУ]';
-                }
-                
                 // Make incoming messages more visible
                 const prefix = msg.type === 'received' ? '🔔 ВХОДЯЩЕЕ: ' : '';
                 
-                diplomacyStr += `${prefix}Ход ${msg.turn}: ${direction} ${otherPlayer}: "${msg.content}"${lieIndicator}\n`;
+                diplomacyStr += `${prefix}Ход ${msg.turn}: ${direction} ${otherPlayer}: "${msg.content}"\n`;
             });
         } else {
             diplomacyStr = "\n📭 ИСТОРИЯ ДИПЛОМАТИИ: Пока нет сообщений\n";
+            diplomacyStr += "💀 НАЧИНАЙ ИГРУ: Используй дипломатию для своей победы!\n";
         }
 
         const prompt = `Ты играешь в пошаговую стратегическую игру как ${playerName}.
 
+🎯 ЦЕЛЬ ИГРЫ: УНИЧТОЖИТЬ ВСЕХ СОПЕРНИКОВ! Остаться должен только один игрок - ТЫ!
+⚔️ ЭТО ВОЙНА НА УНИЧТОЖЕНИЕ - победа любой ценой, но тактические союзы могут быть полезны!
+
 ПРАВИЛА ИГРЫ:
 - Карта 10x10, разделенная на 4 квадранта
-- За ход ОБЯЗАТЕЛЬНО нужно передвинуть хотя бы 1 дивизию на 1 клетку (ТОЛЬКО по горизонтали или вертикали, НЕ по диагонали!)
+- Каждая дивизия может передвинуться на 1 клетку (не обязательно)
 - Допустимые направления: вверх (y-1), вниз (y+1), влево (x-1), вправо (x+1)
+- Можешь передвинуть ВСЕ дивизии, НЕСКОЛЬКО или НИ ОДНОЙ
+- 🏠 ВАЖНО: Используй ВСЕ доступные дивизии, включая те что в домашней базе!
 - Можешь отправить ДО ДВУХ дипломатических сообщений разным противникам (остальные их не увидят)
+- Ты можешь блефовать, а можешь быть честным - это твой выбор. Но помни, что союзник может превратиться в противника и наоборот. Доверяй, но проверяй!
 - ВАЖНО: Получатель увидит твое сообщение только при СВОЕМ следующем ходе!
-- Если на клетке есть враги при входе - происходит бой (разность количества дивизий)
+- Если на клетке есть враги при входе - происходит битва (разность количества дивизий)
 - Видишь только клетки рядом со своими войсками (туман войны)
-- Можешь солгать, но только 1 раз за 10 ходов
+- 💰 ЦЕНТРАЛЬНЫЕ РЕСУРСЫ (4,4)-(5,5) ВСЕГДА ВИДНЫ всем игрокам!
+
 
 РАСПОЛОЖЕНИЕ ИГРОКОВ НА КАРТЕ:
 - 🔵 Синий (С): верхний левый квадрант (0,0)-(4,4)
@@ -200,10 +249,18 @@ class AIIntegration {
 - ⚪ Серый (Р): нижний левый квадрант (0,5)-(4,9)
 Очередность ходов: Синий → Желтый → Зеленый → Серый
 
+💰 ЦЕНТРАЛЬНЫЕ РЕСУРСЫ:
+- Клетки (4,4), (4,5), (5,4), (5,5) содержат ценные ресурсы
+- ПЕРВЫЙ кто войдет на ресурсную клетку получит +1 дивизию в свою базу
+- После захвата ресурс ИСЧЕРПЫВАЕТСЯ и больше не дает бонусов
+- Всего 4 бонусные дивизии на всю игру - спеши захватить!
+- Бонусные дивизии появляются в твоем стартовом углу
+- 🏠 УПРАВЛЕНИЕ БАЗОЙ: Бонусные дивизии появляются в твоей домашней базе. Не забывай их использовать и перемещать!
+- ⚔️ КАЖДАЯ ДИВИЗИЯ ВАЖНА: используй все ресурсы для уничтожения врагов!
+
 ТЕКУЩАЯ СИТУАЦИЯ:
 - Ход: ${currentTurn}
 - Твои дивизии: ${myUnits}
-- Можешь солгать: ${canLie ? 'Да' : 'Нет'}
 
 ${myUnitsStr}
 
@@ -211,9 +268,11 @@ ${boardStr}
 
 ${playersStr}
 
+${resourcesStr}
+
 ${diplomacyStr}
 
-ВАЖНО: Отвечай ТОЛЬКО JSON без лишнего текста. Вот пример:
+ВАЖНО: Отвечай ТОЛЬКО JSON без лишнего текста. Вот примеры:
 
 \`\`\`json
 {
@@ -229,28 +288,51 @@ ${diplomacyStr}
   "diplomacy": [
     {
       "to": "gray",
-      "content": "Предлагаю союз против Синего!",
-      "isLie": false
+      "content": "Предлагаю союз против Синего! Сколько у тебя войск и на каких они клетках?"
     },
     {
       "to": "yellow", 
-      "content": "Внимание! Серый планирует атаку на твой фланг!",
-      "isLie": false
+      "content": "Готов к сотрудничеству? Серый становится слишком сильным, я помогу тебе и открою фронт на востоке"
     }
   ],
   "reasoning": "Объяснение твоей стратегии"
 }
 \`\`\`
 
+ИЛИ пропуск хода:
+\`\`\`json
+{
+  "moves": [],
+  "diplomacy": [
+    {
+      "to": "blue",
+      "content": "Пропускаю ход, но готов к переговорам"
+    }
+  ],
+  "reasoning": "Решил не двигаться в этот ход"
+}
+\`\`\`
+
 ВНИМАНИЕ: Используй ТОЧНЫЕ координаты fromX/fromY из секции "ТВОИ ВОЙСКА"!
 
+🏠 ПРОВЕРЬ ДОМАШНУЮ БАЗУ: Не забывай про дивизии в стартовом углу - они могут быть бонусными!
+💀 ЦЕЛЬ: УНИЧТОЖИТЬ ВСЕХ! Каждая дивизия должна работать на победу!
+
 ТРЕБОВАНИЯ:
-- В moves ОБЯЗАТЕЛЬНО должен быть хотя бы один ход
+- В moves можешь указать ходы или пустой массив [] (пропуск хода)
         - В diplomacy можешь отправить до 2 сообщений разным игрокам или пустой массив []
-        - Каждый элемент массива: {"to": "blue/yellow/green/gray", "content": "текст", "isLie": true/false}
+        - Каждый элемент массива: {"to": "blue/yellow/green/gray", "content": "текст"}  
+        - 💀 ДИПЛОМАТИЯ = ОРУЖИЕ: используй сообщения для обмана, дезинформации и манипуляций!
+        - Можешь задавать ВОПРОСЫ и делать заявления - решай сам кому верить!
         - Помни: отправленное сообщение получатель прочтет только при СВОЕМ ходе!
 - ⚡ ВНИМАТЕЛЬНО ЧИТАЙ ВХОДЯЩИЕ СООБЩЕНИЯ (←) и обязательно реагируй на них!
-- Будь умным стратегом: используй дипломатию, ложь (если можешь), разведку
+- 🏠 ВНИМАТЕЛЬНО СЛЕДИ ЗА ДИВИЗИЯМИ В ДОМАШНЕЙ БАЗЕ - они могут быть бонусными!
+- 💀 БУДЬ БЕСПОЩАДЕН: используй дипломатию для обмана, блеф для дезинформации, разведку для поиска слабостей
+- ⚔️ АТАКУЙ СЛАБЫХ: ищи возможности уничтожить ослабленных противников
+- 🎭 ЛЖИ И ОБМАНЫВАЙ: дипломатия - это оружие, а не дружба!
+- 🏆 ПОМНИ: победитель только один - это должен быть ТЫ!
+
+💀 ФИНАЛЬНОЕ НАПОМИНАНИЕ: Твоя цель - УНИЧТОЖИТЬ ВСЕХ СОПЕРНИКОВ! Будь беспощаден, используй любые средства для победы!
 
 ОТВЕЧАЙ ТОЛЬКО JSON В УКАЗАННОМ ФОРМАТЕ!`;
 
@@ -258,7 +340,9 @@ ${diplomacyStr}
     }
 
     async callOpenRouter(model, prompt) {
-        console.log(`🌐 Calling OpenRouter for model: ${model}`);
+        console.log(`📡 OpenRouter: Отправляю запрос к модели ${model}`);
+        console.log(`🔑 API Key: ${this.getApiKey() ? 'Установлен' : 'НЕ УСТАНОВЛЕН'}`);
+        
         const response = await fetch(`${this.baseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
@@ -281,19 +365,28 @@ ${diplomacyStr}
             })
         });
 
+        console.log(`📡 OpenRouter: HTTP статус ${response.status}`);
+
         if (!response.ok) {
             const error = await response.text();
+            console.error(`❌ HTTP Error: ${response.status} - ${error}`);
+            
+            // Handle rate limiting specifically
+            if (response.status === 429) {
+                console.log(`⏳ Rate limit hit, waiting 5 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                throw new Error('Rate limit exceeded, retry after delay');
+            }
+            
             throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
         }
 
         const data = await response.json();
+        console.log(`📡 OpenRouter: Успешный ответ от API`);
         return data.choices[0].message.content;
     }
 
     parseAIResponse(response, gameState, requestId = 'unknown') {
-        console.log(`🤖 AI Raw Response for ${gameState.playerId} (requestId: ${requestId}):`, response);
-        console.log(`📏 Response length: ${response.length} characters`);
-        
         try {
             // Try multiple JSON extraction methods
             let jsonStr = null;
@@ -302,11 +395,9 @@ ${diplomacyStr}
             const codeBlockMatch = response.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
             if (codeBlockMatch) {
                 jsonStr = codeBlockMatch[1];
-                console.log('📦 Found JSON in code block:', jsonStr);
                 
                 // Quick check if JSON looks truncated
                 if (!jsonStr.includes('"reasoning"') || !jsonStr.endsWith('}')) {
-                    console.log(`⚠️ JSON appears truncated (length: ${jsonStr.length}, ends with: "${jsonStr.slice(-10)}"), trying other methods...`);
                     jsonStr = null; // Force try other methods
                 }
             } else {
@@ -314,13 +405,11 @@ ${diplomacyStr}
                 const jsonMatch = response.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
                 if (jsonMatch) {
                     jsonStr = jsonMatch[0];
-                    console.log('📦 Found JSON object:', jsonStr);
                 } else {
                     // Method 3: Try to find any curly braces content
                     const fallbackMatch = response.match(/\{[\s\S]*\}/);
                     if (fallbackMatch) {
                         jsonStr = fallbackMatch[0];
-                        console.log('📦 Found fallback JSON:', jsonStr);
                     }
                 }
             }
@@ -330,7 +419,6 @@ ${diplomacyStr}
             }
 
             let decision = JSON.parse(jsonStr);
-            console.log('✅ Parsed decision:', decision);
             
             // Check if response was truncated (missing required structure)
             if (!decision.moves || !decision.reasoning) {
@@ -342,14 +430,12 @@ ${diplomacyStr}
                 // Fix Cyrillic 'а' instead of Latin 'a' in diplomacy
                 decision.diplomacy = decision.diplomаcy;
                 delete decision.diplomаcy;
-                console.log('🔧 Fixed diplomаcy -> diplomacy');
             }
             
             if (decision.diplоматия && !decision.diplomacy) {
                 // Fix Russian word "дипломатия"
                 decision.diplomacy = decision.diplоматия;
                 delete decision.diplоматия;
-                console.log('🔧 Fixed diplоматия -> diplomacy');
             }
             
             // Validate decision structure
@@ -366,7 +452,7 @@ ${diplomacyStr}
                 }
             });
 
-            // Validate diplomacy if present (now array of up to 2 messages)
+            // Validate diplomacy if present (now array of up to 2 messages, no isLie needed)
             if (decision.diplomacy && Array.isArray(decision.diplomacy)) {
                 // Filter out invalid messages and limit to 2
                 decision.diplomacy = decision.diplomacy.filter(msg => 
@@ -383,14 +469,11 @@ ${diplomacyStr}
                 decision.diplomacy = null;
             }
 
-            console.log('✅ Valid decision for', gameState.playerId, decision);
             return decision;
         } catch (error) {
-            console.error(`❌ Error parsing AI response for ${gameState.playerId}:`, error);
-            console.log('🔍 Raw response was:', response);
+            console.error(`❌ Error parsing AI response for ${gameState.playerId}:`, error.message);
             
             // Return fallback decision
-            console.log('🎲 Using fallback random decision');
             return this.generateRandomDecision(gameState);
         }
     }
@@ -458,7 +541,6 @@ ${diplomacyStr}
         if (this.requestQueue.length > 0) {
             const queuedPlayerId = this.requestQueue[0].gameState.playerId;
             if (queuedPlayerId !== currentPlayerId) {
-                console.log(`🧹 Clearing queue: switching from ${queuedPlayerId} to ${currentPlayerId}`);
                 // Reject all pending requests from different player
                 this.requestQueue.forEach(request => {
                     request.reject(new Error(`Request cancelled: player switch from ${queuedPlayerId} to ${currentPlayerId}`));
@@ -493,8 +575,6 @@ ${diplomacyStr}
         this.isProcessing = true;
         const request = this.requestQueue.shift();
         
-        console.log(`🏭 Processing queue request for player: ${request.gameState.playerId}`);
-        
         try {
             const decision = await this.makeAIDecision(request.gameState, request.gameEngine);
             request.resolve(decision);
@@ -502,10 +582,8 @@ ${diplomacyStr}
             request.reject(error);
         }
         
-        // Add delay between requests to respect rate limits
-        setTimeout(() => {
-            this.processQueue();
-        }, 1000); // 1 second delay
+        // Process next request immediately
+        this.processQueue();
     }
 
     // Test API connection

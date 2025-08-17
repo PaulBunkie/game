@@ -132,7 +132,10 @@ class Game {
     }
 
     async nextTurn() {
-        if (this.gameEngine.gameState !== 'running') return;
+        if (this.gameEngine.gameState !== 'running') {
+            console.log(`⏸️ Game not running, state: ${this.gameEngine.gameState}`);
+            return;
+        }
         
         // Prevent parallel turn processing
         if (this.isProcessingTurn) {
@@ -187,21 +190,13 @@ class Game {
             // Execute AI decision
             const success = this.gameEngine.makeMove(currentPlayer.id, decision.moves, decision.diplomacy);
             
-            if (success) {
-                this.gameEngine.draw();
-                console.log(`✅ Turn completed successfully for ${currentPlayer.name}`);
-                
-                // Move to next player AFTER successful move execution
-                this.gameEngine.nextTurn();
-                this.updateUI(); // Update UI AFTER changing player
-            } else {
-                console.log(`❌ Move failed for ${currentPlayer.name}`);
-                this.showMessage(`Ошибка выполнения хода ${currentPlayer.name}`, 'error');
-                
-                // Force next turn if move failed
-                this.gameEngine.nextTurn();
-                this.updateUI(); // Update UI AFTER changing player
-            }
+            // Always proceed to next turn (moves are now optional)
+            this.gameEngine.draw();
+            console.log(`✅ Turn completed for ${currentPlayer.name} (moves: ${decision.moves ? decision.moves.length : 0})`);
+            
+            // Move to next player
+            this.gameEngine.nextTurn();
+            this.updateUI(); // Update UI AFTER changing player
             
         } catch (error) {
             console.error(`Error processing turn for ${currentPlayer.name}:`, error);
@@ -277,14 +272,9 @@ class Game {
     updatePlayerStats() {
         this.gameEngine.players.forEach(player => {
             const unitsElement = document.getElementById(`${player.id}-units`);
-            const liesElement = document.getElementById(`${player.id}-lies`);
             
             if (unitsElement) {
                 unitsElement.textContent = player.units;
-            }
-            
-            if (liesElement) {
-                liesElement.textContent = player.lies;
             }
             
             // Update player card style based on status
@@ -307,6 +297,11 @@ class Game {
         const pauseButton = document.getElementById('pause-game');
         const resetButton = document.getElementById('reset-game');
         
+        // Reset button is always enabled for safety
+        if (resetButton) {
+            resetButton.disabled = false;
+        }
+        
         switch (this.gameEngine.gameState) {
             case 'waiting':
                 startButton.disabled = false;
@@ -318,7 +313,7 @@ class Game {
             case 'running':
                 startButton.disabled = true;
                 nextButton.disabled = false; // Always allow manual next turn
-                pauseButton.disabled = false;
+                pauseButton.disabled = false; // Always allow pause
                 pauseButton.textContent = '⏸️ Пауза';
                 break;
                 
@@ -339,11 +334,29 @@ class Game {
     }
 
     setUILoading(loading) {
-        const controls = document.querySelector('.controls');
         if (loading) {
-            controls.classList.add('loading');
+            // During AI thinking: disable only action buttons, keep pause/reset enabled
+            const startButton = document.getElementById('start-game');
+            const nextButton = document.getElementById('next-turn');
+            if (startButton) startButton.disabled = true;
+            if (nextButton) nextButton.disabled = true;
+            
+            // IMPORTANT: Keep pause and reset buttons always enabled
+            const pauseButton = document.getElementById('pause-game');
+            const resetButton = document.getElementById('reset-game');
+            if (pauseButton) pauseButton.disabled = false;
+            if (resetButton) resetButton.disabled = false;
+            
+            // Show visual feedback without blocking interactions
+            const controls = document.querySelector('.controls');
+            if (controls) controls.classList.add('loading');
         } else {
-            controls.classList.remove('loading');
+            // AI thinking finished: restore normal button states
+            const controls = document.querySelector('.controls');
+            if (controls) controls.classList.remove('loading');
+            
+            // Let updateControls handle the proper button states
+            this.updateControls();
         }
     }
 

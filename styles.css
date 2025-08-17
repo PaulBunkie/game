@@ -321,24 +321,12 @@ h1 {
 /* Loading States */
 .loading {
     opacity: 0.6;
-    pointer-events: none;
+    /* Don't block all interactions, just show visual loading state */
 }
 
+/* Remove the spinning icon - it's confusing and covers button text */
 .loading::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 20px;
-    height: 20px;
-    margin: -10px 0 0 -10px;
-    border: 2px solid transparent;
-    border-top: 2px solid #007bff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
+    display: none;
 }
 
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
+/* Removed spin animation - no longer needed */
