@@ -200,6 +200,13 @@ class Game {
             
             // Log AI decision
             console.log(`${currentPlayer.name} decision:`, decision);
+            console.log(`🔍 AI moves details:`, decision.moves);
+            if (decision.moves && decision.moves.length > 0) {
+                decision.moves.forEach((move, index) => {
+                    console.log(`📋 Move ${index + 1}: from(${move.fromX},${move.fromY}) to(${move.toX},${move.toY}) units:${move.unitCount}`);
+                });
+            }
+            
             if (decision.reasoning) {
                 this.gameEngine.addLogEntry(`💭 ${currentPlayer.name}: ${decision.reasoning}`);
             } else {

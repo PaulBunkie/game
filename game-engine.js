@@ -249,6 +249,7 @@ class GameEngine {
 
     validateMoves(moves, playerId) {
         const validMoves = [];
+        console.log(`🔍 Validating ${moves.length} moves for ${playerId}:`, moves);
         
         moves.forEach((move, index) => {
             const { fromX, fromY, toX, toY, unitCount } = move;
@@ -290,34 +291,60 @@ class GameEngine {
             validMoves.push(move);
         });
         
+        console.log(`✅ Validation complete: ${validMoves.length}/${moves.length} moves are valid`);
         return validMoves;
     }
 
     executeMoves(moves, playerId) {
-        moves.forEach(move => {
+        console.log(`🔍 Executing ${moves.length} moves for ${playerId}:`, moves);
+        
+        moves.forEach((move, index) => {
             const { fromX, fromY, toX, toY, unitCount } = move;
+            console.log(`📋 Move ${index + 1}: Moving ${unitCount} units from (${fromX},${fromY}) to (${toX},${toY})`);
             
             const sourceCell = this.board[fromY][fromX];
             const targetCell = this.board[toY][toX];
             
+            // Log initial state
+            const initialSourceUnits = sourceCell.units.find(u => u.player === playerId)?.count || 0;
+            const initialTargetUnits = targetCell.units.find(u => u.player === playerId)?.count || 0;
+            console.log(`📊 Initial state: Source(${fromX},${fromY}): ${initialSourceUnits}, Target(${toX},${toY}): ${initialTargetUnits}`);
+            
             // Remove units from source
             const playerUnit = sourceCell.units.find(u => u.player === playerId);
+            if (!playerUnit) {
+                console.error(`❌ ERROR: No units found for player ${playerId} at source (${fromX},${fromY})`);
+                return;
+            }
+            
+            if (playerUnit.count < unitCount) {
+                console.error(`❌ ERROR: Not enough units at source. Has: ${playerUnit.count}, needs: ${unitCount}`);
+                return;
+            }
+            
             playerUnit.count -= unitCount;
+            console.log(`📤 Removed ${unitCount} units from source. Remaining: ${playerUnit.count}`);
+            
             if (playerUnit.count === 0) {
                 sourceCell.units = sourceCell.units.filter(u => u.player !== playerId);
+                console.log(`🗑️ Source cell cleared (no units left)`);
             }
             
             // Check for battle at target
             const enemyUnits = targetCell.units.filter(u => u.player !== playerId);
             if (enemyUnits.length > 0) {
+                console.log(`⚔️ Battle detected at target (${toX},${toY}) with ${enemyUnits.length} enemy units`);
                 this.processBattle(toX, toY, playerId, unitCount, enemyUnits);
             } else {
                 // No battle, just move
+                console.log(`🚶 No battle, moving ${unitCount} units to target`);
                 const existingUnit = targetCell.units.find(u => u.player === playerId);
                 if (existingUnit) {
                     existingUnit.count += unitCount;
+                    console.log(`➕ Added ${unitCount} units to existing stack. Total: ${existingUnit.count}`);
                 } else {
                     targetCell.units.push({ player: playerId, count: unitCount });
+                    console.log(`🆕 Created new unit stack with ${unitCount} units`);
                 }
             }
             
@@ -368,39 +395,53 @@ class GameEngine {
         
         // Update player total units
         this.updatePlayerUnits();
+        console.log(`🔄 Player units updated for ${playerId}`);
     }
 
     processBattle(x, y, attackerId, attackerUnits, defenders) {
+        console.log(`⚔️ Processing battle at (${x},${y}): ${attackerId} attacking with ${attackerUnits} units against ${defenders.length} defenders`);
+        
         const cell = this.board[y][x];
         let remainingAttackers = attackerUnits;
         
+        console.log(`📊 Battle start: ${attackerId} has ${attackerUnits} units, defenders:`, defenders);
+        
         // Battle against each defender
-        defenders.forEach(defender => {
+        defenders.forEach((defender, index) => {
             const defenderUnits = defender.count;
+            console.log(`🛡️ Defender ${index + 1}: ${defender.player} with ${defenderUnits} units`);
             
             if (remainingAttackers > defenderUnits) {
                 // Attacker wins
                 remainingAttackers -= defenderUnits;
                 cell.units = cell.units.filter(u => u.player !== defender.player);
+                console.log(`✅ Attacker wins against ${defender.player}. Remaining attackers: ${remainingAttackers}`);
             } else if (remainingAttackers < defenderUnits) {
                 // Defender wins
                 defender.count -= remainingAttackers;
                 remainingAttackers = 0;
+                console.log(`❌ Defender ${defender.player} wins. Remaining defenders: ${defender.count}`);
             } else {
                 // Tie - both destroyed
                 cell.units = cell.units.filter(u => u.player !== defender.player);
                 remainingAttackers = 0;
+                console.log(`⚖️ Tie - both destroyed. Remaining attackers: ${remainingAttackers}`);
             }
         });
         
         // Place remaining attackers if any
         if (remainingAttackers > 0) {
+            console.log(`🏃 Placing ${remainingAttackers} remaining attackers in target cell`);
             const existingAttacker = cell.units.find(u => u.player === attackerId);
             if (existingAttacker) {
                 existingAttacker.count += remainingAttackers;
+                console.log(`➕ Added ${remainingAttackers} units to existing stack. Total: ${existingAttacker.count}`);
             } else {
                 cell.units.push({ player: attackerId, count: remainingAttackers });
+                console.log(`🆕 Created new attacker stack with ${remainingAttackers} units`);
             }
+        } else {
+            console.log(`💀 All attackers destroyed in battle`);
         }
         
         // Log battle

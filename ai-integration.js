@@ -55,15 +55,12 @@ class AIIntegration {
         });
         
         try {
-            console.log(`🔍 AI ${playerId}: Вызываю OpenRouter API для модели ${model}`);
             const response = await this.callOpenRouter(model, systemPrompt, userPrompt);
             
             // Проверяем, что запрос все еще актуален
             if (this.activeRequestId !== requestId) {
                 throw new Error(`Stale request: ${requestId} != ${this.activeRequestId}`);
             }
-            
-            console.log(`✅ AI ${playerId}: Получил ответ длиной ${response?.length || 0}`);
             
             // Check if response is empty or too short
             if (!response || response.trim().length < 10) {
@@ -74,7 +71,6 @@ class AIIntegration {
             
             // Check if we got a fallback decision and retry if so
             if (decision.reasoning === "Случайное решение из-за ошибки AI" && retryCount < 2) {
-                console.log(`🔄 AI ${playerId}: Повторная попытка из-за fallback решения`);
                 await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
                 return this.makeAIDecision(gameState, gameEngine, retryCount + 1, requestId);
             }
@@ -213,10 +209,8 @@ class AIIntegration {
             { x: 5, y: 4 }, { x: 5, y: 5 }
         ];
         
-        console.log(`🔍 Building resources status for ${playerId}...`);
         centralCells.forEach(({ x, y }) => {
             const cell = board[y][x];
-            console.log(`💰 Cell (${x},${y}): resourceCell=${cell.resourceCell}, depleted=${cell.depleted}, units=${JSON.stringify(cell.units)}`);
             
             if (cell.resourceCell) {
                 if (cell.depleted) {
@@ -372,9 +366,26 @@ ${boardStr}
     }
 
     async callOpenRouter(model, systemPrompt, userPrompt) {
-        console.log(`📡 OpenRouter: Отправляю запрос к модели ${model}`);
-        console.log(`🔑 API Key: ${this.getApiKey() ? 'Установлен' : 'НЕ УСТАНОВЛЕН'}`);
-        
+        const requestBody = {
+            model: model,
+            messages: [
+                {
+                    role: 'system',
+                    content: systemPrompt
+                },
+                {
+                    role: 'user',
+                    content: userPrompt
+                }
+            ],
+            temperature: 0.3,
+            max_tokens: 1500,
+            top_p: 0.9
+        };
+
+        // ПОЛНЫЙ JSON ЗАПРОС К МОДЕЛИ
+        console.log('📤 JSON запрос:', JSON.stringify(requestBody, null, 2));
+
         const response = await fetch(`${this.baseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
@@ -383,34 +394,15 @@ ${boardStr}
                 'HTTP-Referer': window.location.origin,
                 'X-Title': 'AI Strategic Battle'
             },
-            body: JSON.stringify({
-                model: model,
-                messages: [
-                    {
-                        role: 'system',
-                        content: systemPrompt
-                    },
-                    {
-                        role: 'user',
-                        content: userPrompt
-                    }
-                ],
-                temperature: 0.3,  // Lower temperature for more consistent responses
-                max_tokens: 1500,  // More tokens to ensure complete responses
-                top_p: 0.9
-            })
+            body: JSON.stringify(requestBody)
         });
-
-        console.log(`📡 OpenRouter: HTTP статус ${response.status}`);
 
         if (!response.ok) {
             const error = await response.text();
             console.error(`❌ HTTP Error: ${response.status} - ${error}`);
             
-            // Handle rate limiting specifically
             if (response.status === 429) {
-                console.log(`⏳ Rate limit hit, waiting 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                await new Promise(resolve => setTimeout(resolve, 5000));
                 throw new Error('Rate limit exceeded, retry after delay');
             }
             
@@ -418,8 +410,12 @@ ${boardStr}
         }
 
         const data = await response.json();
-        console.log(`📡 OpenRouter: Успешный ответ от API`);
-        return data.choices[0].message.content;
+        const aiResponse = data.choices[0].message.content;
+        
+        // Сырой ответ от модели
+        console.log('📥 Сырой ответ:', aiResponse);
+        
+        return aiResponse;
     }
 
     parseAIResponse(response, gameState, requestId = 'unknown') {
@@ -652,8 +648,6 @@ ${boardStr}
         }
 
         try {
-            console.log(`🎤 Commentator: Генерирую комментарий к ходу`);
-            
             const { systemPrompt, userPrompt } = this.generateCommentatorPrompt(gameEngine, lastMove);
             
             const response = await this.callOpenRouter(this.commentatorModel, systemPrompt, userPrompt);
@@ -665,7 +659,6 @@ ${boardStr}
             // Parse commentary response
             const commentary = this.parseCommentaryResponse(response);
             
-            console.log(`✅ Commentator: Получен комментарий: ${commentary}`);
             return commentary;
             
         } catch (error) {
