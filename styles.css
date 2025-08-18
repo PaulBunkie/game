@@ -97,11 +97,18 @@ h1 {
     margin: 4px 0;
 }
 
+/* Game Area */
+.game-area {
+    display: flex;
+    gap: 20px;
+    padding: 30px;
+    background: white;
+}
+
 /* Game Board */
 .game-board {
     text-align: center;
-    padding: 30px;
-    background: white;
+    flex: 1;
 }
 
 #gameCanvas {
@@ -110,6 +117,59 @@ h1 {
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
     cursor: pointer;
     background: #f8f9fa;
+}
+
+/* Commentator Panel */
+.commentator-panel {
+    width: 300px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 2px solid #e9ecef;
+    padding: 20px;
+}
+
+.commentator-panel h3 {
+    text-align: center;
+    margin-bottom: 15px;
+    color: #495057;
+    font-size: 1.2em;
+}
+
+#commentator-container {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.commentator-entry {
+    background: white;
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    border-left: 4px solid #007bff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.commentator-entry:last-child {
+    margin-bottom: 0;
+}
+
+.commentator-info {
+    color: #6c757d;
+    font-style: italic;
+}
+
+.commentator-comment {
+    color: #333;
+    font-weight: 500;
+    line-height: 1.4;
+    margin-top: 8px;
+}
+
+.commentator-turn {
+    color: #007bff;
+    font-weight: bold;
+    font-size: 0.9em;
+    margin-bottom: 5px;
 }
 
 /* Controls */

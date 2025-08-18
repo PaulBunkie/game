@@ -127,6 +127,15 @@ class Game {
         this.updateUI();
         this.showMessage('🚀 Игра началась!', 'success');
         
+        // Add initial commentator entry
+        try {
+            const commentary = await this.aiIntegration.generateCommentary(this.gameEngine);
+            this.gameEngine.addCommentatorEntry(commentary, 0);
+        } catch (error) {
+            console.error(`❌ Error generating initial commentary:`, error);
+            this.gameEngine.addCommentatorEntry("Игра начинается! Все игроки готовы к битве!", 0);
+        }
+        
         // AUTO-PLAY: Start first turn immediately
         this.nextTurn();
     }
@@ -199,6 +208,23 @@ class Game {
             
             // Execute AI decision
             const success = this.gameEngine.makeMove(currentPlayer.id, decision.moves, decision.diplomacy);
+            
+            // Generate commentator commentary
+            try {
+                const lastMove = {
+                    playerName: currentPlayer.name,
+                    movesCount: decision.moves ? decision.moves.length : 0,
+                    diplomacyCount: decision.diplomacy ? decision.diplomacy.length : 0
+                };
+                
+                const commentary = await this.aiIntegration.generateCommentary(this.gameEngine, lastMove);
+                this.gameEngine.addCommentatorEntry(commentary, this.gameEngine.currentTurn);
+                console.log(`🎤 Commentator: ${commentary}`);
+            } catch (error) {
+                console.error(`❌ Error generating commentary:`, error);
+                // Add fallback commentary
+                this.gameEngine.addCommentatorEntry("Комментатор анализирует ситуацию...", this.gameEngine.currentTurn);
+            }
             
             // Check if game ended after this move
             if (this.gameEngine.gameState === 'finished') {
@@ -493,6 +519,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.debugPlayerVisibility = (playerId) => window.game.gameEngine.debugPlayerVisibility(playerId);
     window.debugPlayerStatus = () => window.game.gameEngine.debugPlayerStatus();
     window.testBaseCapture = () => window.game.gameEngine.testBaseCapture();
+    window.testCommentator = () => window.game.aiIntegration.generateCommentary(window.game.gameEngine);
     window.resetTurnProcessing = () => {
         console.log('🔧 Emergency reset: clearing turn processing flag');
         window.game.isProcessingTurn = false;
@@ -510,6 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('- debugPlayerVisibility("blue") - show what Blue player can see');
     console.log('- debugPlayerStatus() - show detailed player status and game state');
     console.log('- testBaseCapture() - test base capture logic');
+    console.log('- testCommentator() - test commentator functionality');
     // testModelNaming removed - using static color names now
     console.log('- resetTurnProcessing() - emergency reset if game hangs (timeout: 2 minutes)');
 });

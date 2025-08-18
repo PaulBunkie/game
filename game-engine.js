@@ -49,7 +49,8 @@ class GameEngine {
             units: [],
             visible: {}, // visibility for each player
             resourceCell: (x >= 4 && x <= 5 && y >= 4 && y <= 5), // Central resource cells
-            depleted: false // Whether the resource has been claimed
+            depleted: false, // Whether the resource has been claimed
+            baseCapture: false // Whether this base has been captured (for enemy bases)
         })));
 
         this.cellSize = 60;
@@ -349,6 +350,9 @@ class GameEngine {
                 const player = this.players.find(p => p.id === playerId);
                 const playerHomeCell = this.board[player.startPosition.y][player.startPosition.x];
                 
+                // Mark the enemy base as captured (one-time bonus)
+                this.board[toY][toX].baseCapture = true;
+                
                 // Add 10 bonus units to home position
                 const existingHome = playerHomeCell.units.find(u => u.player === playerId);
                 if (existingHome) {
@@ -526,6 +530,13 @@ class GameEngine {
         // If it's not the attacker's own base and there are enemy units, it's a capture
         if (baseOwner && baseOwner.id !== attackerId) {
             const cell = this.board[y][x];
+            
+            // Check if this base has already been captured (one-time bonus)
+            if (cell.baseCapture) {
+                console.log(`🏰 Base at (${x},${y}) already captured - no bonus available`);
+                return false;
+            }
+            
             const enemyUnits = cell.units.filter(u => u.player !== attackerId);
             
             // If there are enemy units in their base, it's a capture
@@ -775,7 +786,8 @@ class GameEngine {
                         units: cell.units.map(u => ({ player: u.player, count: u.count })),
                         visible: true,
                         resourceCell: cell.resourceCell,
-                        depleted: cell.depleted
+                        depleted: cell.depleted,
+                        baseCapture: cell.baseCapture
                     };
                 } else {
                     // Central resource cells are always visible to all players
@@ -784,7 +796,8 @@ class GameEngine {
                             units: cell.units.map(u => ({ player: u.player, count: u.count })),
                             visible: true,
                             resourceCell: true,
-                            depleted: cell.depleted
+                            depleted: cell.depleted,
+                            baseCapture: cell.baseCapture
                         };
                         console.log(`💰 ${playerId} sees central resource at (${x},${y}): ${cell.depleted ? 'DEPLETED' : 'AVAILABLE'}`);
                     } else {
@@ -792,7 +805,8 @@ class GameEngine {
                             units: [],
                             visible: false,
                             resourceCell: false,
-                            depleted: false
+                            depleted: false,
+                            baseCapture: false
                         };
                     }
                 }
@@ -989,6 +1003,22 @@ class GameEngine {
             `;
             diplomacyContainer.appendChild(entry);
             diplomacyContainer.scrollTop = diplomacyContainer.scrollHeight;
+        }
+    }
+
+    // Add commentator entry
+    addCommentatorEntry(commentary, turn) {
+        const commentatorContainer = document.getElementById('commentator-container');
+        if (commentatorContainer) {
+            const entry = document.createElement('div');
+            entry.className = 'commentator-entry';
+            
+            entry.innerHTML = `
+                <div class="commentator-turn">[Ход ${turn}]</div>
+                <div class="commentator-comment">${commentary}</div>
+            `;
+            commentatorContainer.appendChild(entry);
+            commentatorContainer.scrollTop = commentatorContainer.scrollHeight;
         }
     }
 
