@@ -150,10 +150,20 @@ class Game {
         const turnTimeout = setTimeout(() => {
             console.log('⏰ Turn timeout! Force reset processing flag');
             this.isProcessingTurn = false;
-        }, 60000); // 60 seconds timeout (1 minute)
+        }, 120000); // 120 seconds timeout (2 minutes)
 
         // Get current player FRESH each time (don't cache it)
         let currentPlayer = this.gameEngine.getCurrentPlayer();
+        
+        // Check if there are any alive players
+        if (!currentPlayer) {
+            console.log('☠️ No alive players found, ending game');
+            this.gameEngine.gameState = 'finished';
+            this.showMessage('☠️ Все игроки уничтожены. Игра завершена!', 'info');
+            this.setUILoading(false);
+            this.isProcessingTurn = false;
+            return;
+        }
         
         try {
             console.log(`🎲 Processing turn for player: ${currentPlayer.name} (index: ${this.gameEngine.currentPlayerIndex})`);
@@ -190,6 +200,14 @@ class Game {
             // Execute AI decision
             const success = this.gameEngine.makeMove(currentPlayer.id, decision.moves, decision.diplomacy);
             
+            // Check if game ended after this move
+            if (this.gameEngine.gameState === 'finished') {
+                console.log(`🏁 Game ended after ${currentPlayer.name}'s move`);
+                this.gameEngine.draw();
+                this.updateUI();
+                return; // Don't continue to next turn
+            }
+            
             // Always proceed to next turn (moves are now optional)
             this.gameEngine.draw();
             console.log(`✅ Turn completed for ${currentPlayer.name} (moves: ${decision.moves ? decision.moves.length : 0})`);
@@ -204,6 +222,14 @@ class Game {
             
             // Skip turn on error
             this.gameEngine.nextTurn();
+            
+            // Check if game ended after error
+            if (this.gameEngine.gameState === 'finished') {
+                console.log(`🏁 Game ended after error in ${currentPlayer.name}'s turn`);
+                this.updateUI();
+                return; // Don't continue
+            }
+            
             this.updateUI(); // Update UI AFTER changing player
         } finally {
             clearTimeout(turnTimeout); // Clear timeout if turn completed normally
@@ -216,10 +242,13 @@ class Game {
         if (this.gameEngine.gameState === 'finished') {
             this.stopAutoPlay();
             this.showMessage('🏁 Игра завершена!', 'success');
+            console.log('🏁 Game finished, stopping auto-play');
         } else if (this.gameEngine.gameState === 'running') {
             // AUTO-PLAY: Automatically continue to next turn immediately (only if game is still running)
             console.log('🔄 Auto-continuing to next turn...');
             this.nextTurn();
+        } else if (this.gameEngine.gameState === 'paused') {
+            console.log('⏸️ Game paused, not auto-continuing');
         } else {
             console.log(`🔄 Not auto-continuing: game state is ${this.gameEngine.gameState}`);
         }
@@ -461,6 +490,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.getModelStatus = () => window.game.getModelStatus();
     window.debugBoard = () => window.game.gameEngine.debugBoardState();
     window.debugDiplomacy = (playerId) => window.game.gameEngine.debugDiplomacy(playerId);
+    window.debugPlayerVisibility = (playerId) => window.game.gameEngine.debugPlayerVisibility(playerId);
+    window.debugPlayerStatus = () => window.game.gameEngine.debugPlayerStatus();
+    window.testBaseCapture = () => window.game.gameEngine.testBaseCapture();
     window.resetTurnProcessing = () => {
         console.log('🔧 Emergency reset: clearing turn processing flag');
         window.game.isProcessingTurn = false;
@@ -475,6 +507,9 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('- debugBoard() - show current board state');
     console.log('- debugDiplomacy() - show all diplomacy history');
     console.log('- debugDiplomacy("blue") - show diplomacy for specific player');
+    console.log('- debugPlayerVisibility("blue") - show what Blue player can see');
+    console.log('- debugPlayerStatus() - show detailed player status and game state');
+    console.log('- testBaseCapture() - test base capture logic');
     // testModelNaming removed - using static color names now
-    console.log('- resetTurnProcessing() - emergency reset if game hangs');
+    console.log('- resetTurnProcessing() - emergency reset if game hangs (timeout: 2 minutes)');
 });

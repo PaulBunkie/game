@@ -94,6 +94,8 @@ class GameEngine {
     }
 
     updateVisibility() {
+        console.log(`🔍 Updating visibility for all players...`);
+        
         // Reset visibility
         for (let y = 0; y < 10; y++) {
             for (let x = 0; x < 10; x++) {
@@ -110,9 +112,11 @@ class GameEngine {
         ];
         
         centralCells.forEach(({ x, y }) => {
+            const cell = this.board[y][x];
             this.players.forEach(player => {
                 this.setVisibility(x, y, player.id, true);
             });
+            console.log(`💰 Central resource cell (${x},${y}): ${cell.depleted ? 'DEPLETED' : 'AVAILABLE'} - visible to all players`);
         });
 
         // Update visibility based on unit positions
@@ -150,7 +154,30 @@ class GameEngine {
     }
 
     getCurrentPlayer() {
-        return this.players[this.currentPlayerIndex];
+        const player = this.players[this.currentPlayerIndex];
+        
+        // Check if current player is alive
+        if (player.units <= 0) {
+            console.log(`⚠️ Current player ${player.name} is dead (0 units), finding next alive player`);
+            // Find next alive player
+            let attempts = 0;
+            const maxAttempts = this.players.length;
+            
+            do {
+                this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+                attempts++;
+                
+                if (attempts >= maxAttempts) {
+                    console.log('⚠️ No alive players found in getCurrentPlayer');
+                    return null;
+                }
+            } while (this.players[this.currentPlayerIndex].units <= 0);
+            
+            console.log(`🔄 Found alive player: ${this.players[this.currentPlayerIndex].name}`);
+            return this.players[this.currentPlayerIndex];
+        }
+        
+        return player;
     }
 
 
@@ -166,6 +193,11 @@ class GameEngine {
         const currentPlayer = this.getCurrentPlayer();
         console.log(`👤 Current player: ${currentPlayer.id}, requested: ${playerId}`);
         
+        if (currentPlayer === null) { // Check if currentPlayer is null (dead)
+            console.log(`❌ Current player is dead, cannot make move.`);
+            return false;
+        }
+
         if (currentPlayer.id !== playerId) {
             console.log(`❌ Wrong player turn! Expected: ${currentPlayer.id}, got: ${playerId}`);
             return false;
@@ -203,7 +235,12 @@ class GameEngine {
         }
         
         this.updateVisibility();
-        this.checkGameEnd();
+        const gameEnded = this.checkGameEnd();
+        
+        if (gameEnded) {
+            console.log(`🏁 Game ended after ${currentPlayer.name}'s move`);
+            return true;
+        }
         
         this.addLogEntry(`✅ ${currentPlayer.name} завершил ход`);
         return true;
@@ -301,6 +338,27 @@ class GameEngine {
                 
                 console.log(`💰 ${player.name} captured resource at (${toX},${toY})! +1 unit added to home base (${player.startPosition.x},${player.startPosition.y})`);
                 this.addLogEntry(`💰 ${player.name} захватил ресурс на (${toX},${toY})! +1 дивизия в базе`);
+                
+                // Force visibility update to ensure all players see the depleted resource
+                this.updateVisibility();
+            }
+            
+            // Check for enemy base capture (corner positions)
+            const enemyBaseCapture = this.checkEnemyBaseCapture(toX, toY, playerId);
+            if (enemyBaseCapture) {
+                const player = this.players.find(p => p.id === playerId);
+                const playerHomeCell = this.board[player.startPosition.y][player.startPosition.x];
+                
+                // Add 10 bonus units to home position
+                const existingHome = playerHomeCell.units.find(u => u.player === playerId);
+                if (existingHome) {
+                    existingHome.count += 10;
+                } else {
+                    playerHomeCell.units.push({ player: playerId, count: 10 });
+                }
+                
+                console.log(`🏰 ${player.name} captured enemy base at (${toX},${toY})! +10 units added to home base (${player.startPosition.x},${player.startPosition.y})`);
+                this.addLogEntry(`🏰 ${player.name} захватил базу противника на (${toX},${toY})! +10 дивизий в базе`);
             }
         });
         
@@ -407,22 +465,99 @@ class GameEngine {
     }
 
     nextTurn() {
-        this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+        // Find next alive player
+        let attempts = 0;
+        const maxAttempts = this.players.length; // Prevent infinite loop
+        
+        do {
+            this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+            attempts++;
+            
+            // Check if we've made a full circle
+            if (attempts >= maxAttempts) {
+                console.log('⚠️ No alive players found, ending game');
+                this.gameState = 'finished';
+                this.addLogEntry('☠️ Все игроки уничтожены. Ничья!');
+                return;
+            }
+        } while (this.players[this.currentPlayerIndex].units <= 0);
+        
+        // Increment turn only when we complete a full round
         if (this.currentPlayerIndex === 0) {
             this.currentTurn++;
         }
+        
+        console.log(`🔄 Next turn: ${this.players[this.currentPlayerIndex].name} (${this.currentPlayerIndex})`);
     }
 
     checkGameEnd() {
         const alivePlayers = this.players.filter(p => p.units > 0);
+        console.log(`🔍 Game end check: ${alivePlayers.length} alive players out of ${this.players.length}`);
+        
         if (alivePlayers.length <= 1) {
             this.gameState = 'finished';
             if (alivePlayers.length === 1) {
-                this.addLogEntry(`🏆 ${alivePlayers[0].name} побеждает!`);
+                const winner = alivePlayers[0];
+                console.log(`🏆 Game ended: ${winner.name} wins with ${winner.units} units!`);
+                this.addLogEntry(`🏆 ${winner.name} побеждает с ${winner.units} дивизиями!`);
             } else {
+                console.log('☠️ Game ended: All players destroyed - draw!');
                 this.addLogEntry('☠️ Все игроки уничтожены. Ничья!');
             }
+            return true; // Game ended
         }
+        
+        return false; // Game continues
+    }
+
+    // Check if a position is an enemy base (corner position)
+    checkEnemyBaseCapture(x, y, attackerId) {
+        // Check if this is a corner position (base)
+        const isCorner = (x === 0 && y === 0) || (x === 9 && y === 0) || 
+                        (x === 9 && y === 9) || (x === 0 && y === 9);
+        
+        if (!isCorner) return false;
+        
+        // Find which player's base this is
+        const baseOwner = this.players.find(p => 
+            p.startPosition.x === x && p.startPosition.y === y
+        );
+        
+        // If it's not the attacker's own base and there are enemy units, it's a capture
+        if (baseOwner && baseOwner.id !== attackerId) {
+            const cell = this.board[y][x];
+            const enemyUnits = cell.units.filter(u => u.player !== attackerId);
+            
+            // If there are enemy units in their base, it's a capture
+            if (enemyUnits.length > 0) {
+                console.log(`🏰 Base capture detected: ${attackerId} attacking ${baseOwner.id}'s base at (${x},${y})`);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    // Test function for base capture logic
+    testBaseCapture() {
+        console.log('🧪 Testing base capture logic...');
+        
+        // Test 1: Blue attacking Yellow's base
+        console.log('Test 1: Blue attacking Yellow base (9,0)');
+        const result1 = this.checkEnemyBaseCapture(9, 0, 'blue');
+        console.log(`Result: ${result1}`);
+        
+        // Test 2: Blue attacking own base (should fail)
+        console.log('Test 2: Blue attacking own base (0,0)');
+        const result2 = this.checkEnemyBaseCapture(0, 0, 'blue');
+        console.log(`Result: ${result2}`);
+        
+        // Test 3: Non-corner position (should fail)
+        console.log('Test 3: Non-corner position (5,5)');
+        const result3 = this.checkEnemyBaseCapture(5, 5, 'blue');
+        console.log(`Result: ${result3}`);
+        
+        console.log('🧪 Base capture tests completed');
     }
 
     // Debug function to show current board state
@@ -433,7 +568,11 @@ class GameEngine {
             for (let x = 0; x < 10; x++) {
                 const cell = this.board[y][x];
                 if (cell.units.length === 0) {
-                    row += ' . ';
+                    if (cell.resourceCell) {
+                        row += cell.depleted ? '🏜️ ' : '💰 ';
+                    } else {
+                        row += ' . ';
+                    }
                 } else {
                     const unit = cell.units[0];
                     const symbol = unit.player[0].toUpperCase();
@@ -443,9 +582,33 @@ class GameEngine {
             console.log(row);
         }
         
+        console.log('💰 Central resources status:');
+        const centralCells = [
+            { x: 4, y: 4 }, { x: 4, y: 5 },
+            { x: 5, y: 4 }, { x: 5, y: 5 }
+        ];
+        centralCells.forEach(({ x, y }) => {
+            const cell = this.board[y][x];
+            console.log(`- (${x},${y}): ${cell.depleted ? 'DEPLETED' : 'AVAILABLE'} - units: ${JSON.stringify(cell.units)}`);
+        });
+        
         console.log('👥 Players status:');
+        this.players.forEach((p, index) => {
+            const isCurrent = index === this.currentPlayerIndex;
+            const status = p.units > 0 ? 'ALIVE' : 'DEAD';
+            const currentMarker = isCurrent ? ' (CURRENT)' : '';
+            console.log(`- ${p.name} (${p.id}): ${p.units} units, ${status}${currentMarker}, start at (${p.startPosition.x}, ${p.startPosition.y}), diplomacy: ${p.diplomacyHistory.length} messages`);
+        });
+        
+        console.log(`🎯 Current player index: ${this.currentPlayerIndex}, Game state: ${this.gameState}`);
+        
+        // Show base positions
+        console.log('🏰 Base positions:');
         this.players.forEach(p => {
-            console.log(`- ${p.name} (${p.id}): ${p.units} units, start at (${p.startPosition.x}, ${p.startPosition.y}), diplomacy: ${p.diplomacyHistory.length} messages`);
+            const baseCell = this.board[p.startPosition.y][p.startPosition.x];
+            const baseUnits = baseCell.units.filter(u => u.player === p.id);
+            const totalBaseUnits = baseUnits.reduce((sum, u) => sum + u.count, 0);
+            console.log(`- ${p.name} base (${p.startPosition.x},${p.startPosition.y}): ${totalBaseUnits} units`);
         });
     }
 
@@ -526,10 +689,82 @@ class GameEngine {
             });
         }
     }
+    
+    // Debug function to show visibility for specific player
+    debugPlayerVisibility(playerId) {
+        const player = this.players.find(p => p.id === playerId);
+        if (!player) {
+            console.log(`❌ Player ${playerId} not found`);
+            return;
+        }
+        
+        console.log(`👁️ Visibility for ${player.name} (${playerId}):`);
+        for (let y = 0; y < 10; y++) {
+            let row = `${y} `;
+            for (let x = 0; x < 10; x++) {
+                const cell = this.board[y][x];
+                if (cell.visible[playerId]) {
+                    if (cell.units.length === 0) {
+                        if (cell.resourceCell) {
+                            row += cell.depleted ? '🏜️ ' : '💰 ';
+                        } else {
+                            row += ' . ';
+                        }
+                    } else {
+                        const unit = cell.units[0];
+                        const symbol = unit.player[0].toUpperCase();
+                        row += `${symbol}${unit.count} `;
+                    }
+                } else {
+                    row += ' ? ';
+                }
+            }
+            console.log(row);
+        }
+        
+        console.log(`💰 Central resources visible to ${playerId}:`);
+        const centralCells = [
+            { x: 4, y: 4 }, { x: 4, y: 5 },
+            { x: 5, y: 4 }, { x: 5, y: 5 }
+        ];
+        centralCells.forEach(({ x, y }) => {
+            const cell = this.board[y][x];
+            const isVisible = cell.visible[playerId];
+            console.log(`- (${x},${y}): ${isVisible ? 'VISIBLE' : 'HIDDEN'} - ${cell.depleted ? 'DEPLETED' : 'AVAILABLE'} - units: ${JSON.stringify(cell.units)}`);
+        });
+    }
+
+    // Debug function to show player status
+    debugPlayerStatus() {
+        console.log('👥 Player Status Check:');
+        const alivePlayers = this.players.filter(p => p.units > 0);
+        const deadPlayers = this.players.filter(p => p.units <= 0);
+        
+        console.log(`🟢 Alive players (${alivePlayers.length}):`);
+        alivePlayers.forEach(p => {
+            const isCurrent = this.players.indexOf(p) === this.currentPlayerIndex;
+            console.log(`  - ${p.name} (${p.id}): ${p.units} units${isCurrent ? ' [CURRENT]' : ''}`);
+        });
+        
+        console.log(`🔴 Dead players (${deadPlayers.length}):`);
+        deadPlayers.forEach(p => {
+            console.log(`  - ${p.name} (${p.id}): ${p.units} units`);
+        });
+        
+        console.log(`🎯 Current player index: ${this.currentPlayerIndex}`);
+        console.log(`🎮 Game state: ${this.gameState}`);
+        console.log(`🔄 Turn: ${this.currentTurn}`);
+        
+        if (alivePlayers.length <= 1) {
+            console.log('⚠️ Game should end soon - only 1 or 0 players alive');
+        }
+    }
 
     getGameStateForAI(playerId) {
         const player = this.players.find(p => p.id === playerId);
         const visibleBoard = [];
+        
+        console.log(`🎯 Getting game state for ${playerId} (${player.name})`);
         
         for (let y = 0; y < 10; y++) {
             visibleBoard[y] = [];
@@ -538,13 +773,28 @@ class GameEngine {
                 if (cell.visible[playerId]) {
                     visibleBoard[y][x] = {
                         units: cell.units.map(u => ({ player: u.player, count: u.count })),
-                        visible: true
+                        visible: true,
+                        resourceCell: cell.resourceCell,
+                        depleted: cell.depleted
                     };
                 } else {
-                    visibleBoard[y][x] = {
-                        units: [],
-                        visible: false
-                    };
+                    // Central resource cells are always visible to all players
+                    if (cell.resourceCell) {
+                        visibleBoard[y][x] = {
+                            units: cell.units.map(u => ({ player: u.player, count: u.count })),
+                            visible: true,
+                            resourceCell: true,
+                            depleted: cell.depleted
+                        };
+                        console.log(`💰 ${playerId} sees central resource at (${x},${y}): ${cell.depleted ? 'DEPLETED' : 'AVAILABLE'}`);
+                    } else {
+                        visibleBoard[y][x] = {
+                            units: [],
+                            visible: false,
+                            resourceCell: false,
+                            depleted: false
+                        };
+                    }
                 }
             }
         }
@@ -554,9 +804,8 @@ class GameEngine {
             playerName: player.name,
             currentTurn: this.currentTurn,
             myUnits: player.units,
-
             board: visibleBoard,
-            diplomacyHistory: player.diplomacyHistory,  // История дипломатии игрока
+            diplomacyHistory: player.diplomacyHistory,
             players: this.players.map(p => ({
                 id: p.id,
                 name: p.name,
